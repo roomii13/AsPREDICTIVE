@@ -7,9 +7,7 @@ import {
   Plane,
   MapPin,
   Activity,
-  LogOut,
-  Menu,
-  X
+  LogOut
 } from 'lucide-react';
 import IncidentesTable from './IncidentesTable';
 import AlertasPanel from './AlertasPanel';
@@ -24,60 +22,106 @@ type Alerta = Database['public']['Tables']['alertas']['Row'] & {
   aeropuertos?: { nombre: string } | null;
 };
 
+// ✅ Cálculo real del riesgo promedio
+async function calcularRiesgoPromedio() {
+  const { data } = await supabase
+    .from('incidentes')
+    .select('nivel_riesgo');
+
+  if (!data || data.length === 0) return 0;
+
+  const map: any = { Bajo: 1, Medio: 2, Alto: 3, Crítico: 4 };
+
+  const promedio =
+    data.reduce((acc: number, curr: any) => acc + (map[curr.nivel_riesgo] || 0), 0) /
+    data.length;
+
+  return Math.round((promedio / 4) * 100);
+}
+
+
+async function predecirRiesgoFuturo() {
+  const { data } = await supabase
+    .from('incidentes')
+    .select('*')
+    .order('fecha_hora', { ascending: false })
+    .limit(20);
+
+  if (!data || data.length === 0) return 0;
+
+  // Simulación de tendencia (colocar IA real)
+  const map: any = { Bajo: 1, Medio: 2, Alto: 3, Crítico: 4 };
+
+  const tendencia =
+    data.reduce((acc: number, curr: any) => acc + (map[curr.nivel_riesgo] || 0), 0) /
+    data.length;
+
+  // Simula aumento de riesgo futuro
+  const prediccion = tendencia * (1 + Math.random() * 0.3);
+
+  return Math.min(100, Math.round((prediccion / 4) * 100));
+}
 export default function Dashboard() {
   const { usuario, signOut } = useAuth();
+
   const [stats, setStats] = useState({
-    totalIncidentes: 0,
-    alertasActivas: 0,
-    aeropuertos: 0,
-    riesgoPromedio: 0
-  });
+  totalIncidentes: 0,
+  alertasActivas: 0,
+  aeropuertos: 0,
+  riesgoPromedio: 0,
+  riesgoFuturo: 0 
+});
   const [recentIncidentes, setRecentIncidentes] = useState<Incidente[]>([]);
   const [alertas, setAlertas] = useState<Alerta[]>([]);
   const [loading, setLoading] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
   }, []);
 
-  async function loadDashboardData() {
-    try {
-      const [incidentesRes, alertasRes, aeropuertosRes] = await Promise.all([
-        supabase
-          .from('incidentes')
-          .select('*, aeropuertos(nombre, codigo_icao), tipos_incidente(nombre)')
-          .order('fecha_hora', { ascending: false })
-          .limit(5),
-        supabase
-          .from('alertas')
-          .select('*, aeropuertos(nombre)')
-          .eq('estado', 'Pendiente')
-          .order('fecha_generacion', { ascending: false })
-          .limit(10),
-        supabase.from('aeropuertos').select('id', { count: 'exact', head: true })
-      ]);
-
-      if (incidentesRes.data) setRecentIncidentes(incidentesRes.data);
-      if (alertasRes.data) setAlertas(alertasRes.data);
-
-      const { count: totalIncidentes } = await supabase
+async function loadDashboardData() {
+  try {
+    const [incidentesRes, alertasRes, aeropuertosRes, riesgoPromedio, riesgoFuturo] = await Promise.all([
+      supabase
         .from('incidentes')
-        .select('*', { count: 'exact', head: true });
+        .select('*, aeropuertos(nombre, codigo_icao), tipos_incidente(nombre)')
+        .order('fecha_hora', { ascending: false })
+        .limit(5),
 
-      setStats({
-        totalIncidentes: totalIncidentes || 0,
-        alertasActivas: alertasRes.data?.length || 0,
-        aeropuertos: aeropuertosRes.count || 0,
-        riesgoPromedio: 42
-      });
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
-    } finally {
-      setLoading(false);
-    }
+      supabase
+        .from('alertas')
+        .select('*, aeropuertos(nombre)')
+        .eq('estado', 'Pendiente')
+        .order('fecha_generacion', { ascending: false })
+        .limit(10),
+
+      supabase.from('aeropuertos').select('id', { count: 'exact', head: true }),
+
+      calcularRiesgoPromedio(),
+      predecirRiesgoFuturo()
+    ]);
+
+    if (incidentesRes.data) setRecentIncidentes(incidentesRes.data);
+    if (alertasRes.data) setAlertas(alertasRes.data);
+
+    const { count: totalIncidentes } = await supabase
+      .from('incidentes')
+      .select('*', { count: 'exact', head: true });
+
+    setStats({
+      totalIncidentes: totalIncidentes || 0,
+      alertasActivas: alertasRes.data?.length || 0,
+      aeropuertos: aeropuertosRes.count || 0,
+      riesgoPromedio,
+      riesgoFuturo
+    });
+
+  } catch (error) {
+    console.error('Error loading dashboard:', error);
+  } finally {
+    setLoading(false);
   }
-
+}
   function getRiesgoColor(nivel: string | null) {
     switch (nivel) {
       case 'Crítico': return 'bg-red-100 text-red-800 border-red-300';
@@ -132,76 +176,74 @@ export default function Dashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* 🔥 STATS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="bg-red-100 p-3 rounded-lg">
-                <AlertTriangle className="w-6 h-6 text-red-600" />
-              </div>
-              <span className="text-2xl font-bold text-gray-900">{stats.totalIncidentes}</span>
+
+          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
+            <div className="flex justify-between mb-4">
+              <AlertTriangle className="w-6 h-6 text-red-600" />
+              <span className="text-2xl font-bold">{stats.totalIncidentes}</span>
             </div>
-            <h3 className="text-sm font-medium text-gray-600">Total Incidentes</h3>
+            <h3 className="text-sm text-gray-600">Total Incidentes</h3>
           </div>
 
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="bg-orange-100 p-3 rounded-lg">
-                <Activity className="w-6 h-6 text-orange-600" />
-              </div>
-              <span className="text-2xl font-bold text-gray-900">{stats.alertasActivas}</span>
+          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
+            <div className="flex justify-between mb-4">
+              <Activity className="w-6 h-6 text-orange-600" />
+              <span className="text-2xl font-bold">{stats.alertasActivas}</span>
             </div>
-            <h3 className="text-sm font-medium text-gray-600">Alertas Activas</h3>
+            <h3 className="text-sm text-gray-600">Alertas Activas</h3>
           </div>
 
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="bg-blue-100 p-3 rounded-lg">
-                <MapPin className="w-6 h-6 text-blue-600" />
-              </div>
-              <span className="text-2xl font-bold text-gray-900">{stats.aeropuertos}</span>
+          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
+            <div className="flex justify-between mb-4">
+              <MapPin className="w-6 h-6 text-blue-600" />
+              <span className="text-2xl font-bold">{stats.aeropuertos}</span>
             </div>
-            <h3 className="text-sm font-medium text-gray-600">Aeropuertos</h3>
+            <h3 className="text-sm text-gray-600">Aeropuertos</h3>
           </div>
 
-          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="bg-green-100 p-3 rounded-lg">
-                <TrendingUp className="w-6 h-6 text-green-600" />
-              </div>
-              <span className="text-2xl font-bold text-gray-900">{stats.riesgoPromedio}%</span>
+          <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
+            <div className="flex justify-between mb-4">
+              <TrendingUp className="w-6 h-6 text-green-600" />
+              <span className="text-2xl font-bold">{stats.riesgoPromedio}%</span>
             </div>
-            <h3 className="text-sm font-medium text-gray-600">Índice de Riesgo</h3>
+            <h3 className="text-sm text-gray-600">Índice de Riesgo</h3>
           </div>
+
         </div>
 
+        {/* 📊 CONTENIDO */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Incidentes Recientes</h2>
-            <div className="space-y-3">
-              {recentIncidentes.map((incidente) => (
-                <div key={incidente.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="font-semibold text-gray-900">{incidente.tipos_incidente?.nombre || 'Sin tipo'}</p>
-                      <p className="text-sm text-gray-600">{incidente.aeropuertos?.nombre || 'Sin aeropuerto'}</p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getRiesgoColor(incidente.nivel_riesgo)}`}>
-                      {incidente.nivel_riesgo || 'N/A'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500">{new Date(incidente.fecha_hora).toLocaleString('es-ES')}</p>
-                </div>
-              ))}
-              {recentIncidentes.length === 0 && (
-                <p className="text-gray-500 text-center py-8">No hay incidentes recientes</p>
-              )}
-            </div>
-          </div>
 
+          <div className="bg-white rounded-xl shadow-lg border p-6">
+            <h2 className="text-lg font-bold mb-4">Incidentes Recientes</h2>
+
+            {recentIncidentes.map((incidente) => (
+              <div key={incidente.id} className="border p-4 rounded-lg mb-2">
+                <p className="font-semibold">{incidente.tipos_incidente?.nombre}</p>
+                <p className="text-sm text-gray-600">{incidente.aeropuertos?.nombre}</p>
+                <span className={`text-xs px-2 py-1 rounded ${getRiesgoColor(incidente.nivel_riesgo)}`}>
+                  {incidente.nivel_riesgo}
+                </span>
+              </div>
+            ))}
+
+          </div>
+           <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-100">
+                <div className="flex justify-between mb-4">
+                   <TrendingUp className="w-6 h-6 text-purple-600" />
+                    <span className="text-2xl font-bold">{stats.riesgoFuturo}%</span>
+                </div>
+              <h3 className="text-sm text-gray-600">Riesgo Próximas 24h</h3>
+          </div>
           <AlertasPanel alertas={alertas} onUpdate={loadDashboardData} />
+
         </div>
 
         <IncidentesTable onUpdate={loadDashboardData} />
+
       </div>
     </div>
   );
