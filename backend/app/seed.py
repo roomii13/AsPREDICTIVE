@@ -68,6 +68,30 @@ ARGENTINA_AIRPORTS = [
 ]
 
 
+ARGENTINA_AIRCRAFT = [
+    {"matricula": "LV-FPS", "modelo": "B737-800", "fabricante": "Boeing", "operador": "Aerolineas Argentinas", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 79015},
+    {"matricula": "LV-KHQ", "modelo": "A320", "fabricante": "Airbus", "operador": "Jetsmart", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 77000},
+    {"matricula": "LV-GKO", "modelo": "EMB-190", "fabricante": "Embraer", "operador": "Austral", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 51800},
+    {"matricula": "LV-KEF", "modelo": "B737-8 MAX", "fabricante": "Boeing", "operador": "Aerolineas Argentinas", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 82190},
+    {"matricula": "LV-HFR", "modelo": "A320neo", "fabricante": "Airbus", "operador": "Flybondi", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 79000},
+    {"matricula": "LV-CHQ", "modelo": "Saab 340B", "fabricante": "Saab", "operador": "LADE", "tipo_aeronave": "Regional", "peso_maximo_despegue": 13155},
+    {"matricula": "LV-GAQ", "modelo": "B737-700", "fabricante": "Boeing", "operador": "Aerolineas Argentinas", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 70080},
+    {"matricula": "LV-BYE", "modelo": "Learjet 60", "fabricante": "Bombardier", "operador": "Ejecutiva", "tipo_aeronave": "Ejecutiva", "peso_maximo_despegue": 10659},
+    {"matricula": "LV-FUR", "modelo": "Cessna 172S", "fabricante": "Cessna", "operador": "Escuela de Vuelo", "tipo_aeronave": "Instruccion", "peso_maximo_despegue": 1157},
+    {"matricula": "LV-CBM", "modelo": "PA-34 Seneca", "fabricante": "Piper", "operador": "Aviacion General", "tipo_aeronave": "Aviacion General", "peso_maximo_despegue": 2155},
+    {"matricula": "LV-FQN", "modelo": "Cessna 208B Grand Caravan", "fabricante": "Cessna", "operador": "Carga Regional", "tipo_aeronave": "Carga", "peso_maximo_despegue": 3969},
+    {"matricula": "LV-HUM", "modelo": "Bell 412", "fabricante": "Bell", "operador": "Helicopteros Argentina", "tipo_aeronave": "Helicoptero", "peso_maximo_despegue": 5398},
+    {"matricula": "LV-VCN", "modelo": "Robinson R44", "fabricante": "Robinson", "operador": "Helicopteros Argentina", "tipo_aeronave": "Helicoptero", "peso_maximo_despegue": 1134},
+    {"matricula": "LV-X497", "modelo": "IA-63 Pampa III", "fabricante": "FAdeA", "operador": "Fuerza Aerea Argentina", "tipo_aeronave": "Militar", "peso_maximo_despegue": 5000},
+    {"matricula": "TC-66", "modelo": "C-130H Hercules", "fabricante": "Lockheed Martin", "operador": "Fuerza Aerea Argentina", "tipo_aeronave": "Militar", "peso_maximo_despegue": 70305},
+    {"matricula": "LV-CNT", "modelo": "B1900D", "fabricante": "Beechcraft", "operador": "Regional", "tipo_aeronave": "Regional", "peso_maximo_despegue": 7764},
+    {"matricula": "LV-ABD", "modelo": "ATR 72-600", "fabricante": "ATR", "operador": "Regional", "tipo_aeronave": "Regional", "peso_maximo_despegue": 23000},
+    {"matricula": "LV-FSK", "modelo": "A321-200", "fabricante": "Airbus", "operador": "Charter", "tipo_aeronave": "Comercial", "peso_maximo_despegue": 93500},
+    {"matricula": "LV-MZA", "modelo": "DHC-6 Twin Otter", "fabricante": "De Havilland Canada", "operador": "Patagonia", "tipo_aeronave": "STOL", "peso_maximo_despegue": 5670},
+    {"matricula": "LV-PTN", "modelo": "PA-25 Pawnee", "fabricante": "Piper", "operador": "Trabajo Aereo", "tipo_aeronave": "Agricola", "peso_maximo_despegue": 1315},
+]
+
+
 def _sync_airports(db: Session) -> None:
     existing_by_icao = {airport.codigo_icao: airport for airport in db.scalars(select(Aeropuerto)).all()}
 
@@ -85,6 +109,22 @@ def _sync_airports(db: Session) -> None:
         db.add(Aeropuerto(**payload))
 
 
+def _sync_aircraft(db: Session) -> None:
+    existing_by_registration = {aircraft.matricula: aircraft for aircraft in db.scalars(select(Aeronave)).all()}
+
+    for payload in ARGENTINA_AIRCRAFT:
+        aircraft = existing_by_registration.get(payload["matricula"])
+        if aircraft:
+            aircraft.modelo = payload["modelo"]
+            aircraft.fabricante = payload["fabricante"]
+            aircraft.operador = payload["operador"]
+            aircraft.tipo_aeronave = payload["tipo_aeronave"]
+            aircraft.peso_maximo_despegue = payload["peso_maximo_despegue"]
+            continue
+
+        db.add(Aeronave(**payload))
+
+
 def seed_initial_data(db: Session) -> None:
     if not db.scalar(select(Usuario.id).limit(1)):
         db.add(
@@ -99,14 +139,7 @@ def seed_initial_data(db: Session) -> None:
 
     _sync_airports(db)
 
-    if not db.scalar(select(Aeronave.id).limit(1)):
-        db.add_all(
-            [
-                Aeronave(matricula="LV-FPS", modelo="B737-800", fabricante="Boeing", operador="Aerolineas Argentinas"),
-                Aeronave(matricula="LV-KHQ", modelo="A320", fabricante="Airbus", operador="Jetsmart"),
-                Aeronave(matricula="LV-GKO", modelo="EMB-190", fabricante="Embraer", operador="Austral"),
-            ]
-        )
+    _sync_aircraft(db)
 
     if not db.scalar(select(TipoIncidente.id).limit(1)):
         db.add_all(
