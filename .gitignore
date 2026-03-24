@@ -25,7 +25,9 @@ backend/.env
 backend/.venv/
 backend/__pycache__/
 backend/app/__pycache__/
-backend/models/
+backend/models/*
+!backend/models/.gitkeep
+!backend/models/risk_model.joblib
 data/raw/*.zip
 data/raw/*.mdb
 data/processed/ntsb_full_export/
