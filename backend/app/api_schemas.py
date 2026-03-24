@@ -35,6 +35,33 @@ class AuthResponse(BaseModel):
     user: UsuarioOut
 
 
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    actor_user_id: str | None = None
+    action: str
+    resource_type: str
+    resource_id: str | None = None
+    details_json: str | None = None
+    created_at: datetime
+
+
+class ModelMetricsOut(BaseModel):
+    model_version: str
+    training_rows: int
+    accuracy: float | None = None
+    samples_train: int | None = None
+    samples_test: int | None = None
+
+
 class CatalogAeropuertoOut(BaseModel):
     id: int
     codigo_iata: str | None = None

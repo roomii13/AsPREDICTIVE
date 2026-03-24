@@ -26,3 +26,8 @@ backend/.venv/
 backend/__pycache__/
 backend/app/__pycache__/
 backend/models/
+data/raw/*.zip
+data/raw/*.mdb
+data/processed/ntsb_full_export/
+backend/logs/
+backups/

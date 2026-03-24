@@ -13,6 +13,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
 
 from .schemas import IncidentePayload, NivelRiesgo
 
@@ -20,6 +22,8 @@ from .schemas import IncidentePayload, NivelRiesgo
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT_DIR / "models"
 MODEL_PATH = MODEL_DIR / "risk_model.joblib"
+PROJECT_ROOT = ROOT_DIR.parent
+NTSB_TRAINING_PATH = PROJECT_ROOT / "data" / "processed" / "ntsb_training_base.csv"
 RISK_ORDER: list[NivelRiesgo] = ["Bajo", "Medio", "Alto", "Crítico"]
 RISK_WEIGHTS = np.array([25.0, 50.0, 75.0, 100.0])
 
@@ -40,6 +44,10 @@ def build_feature_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
 
     frame["descripcion"] = column("descripcion", "").fillna("").astype(str)
     frame["fase_vuelo"] = column("fase_vuelo", "").fillna("").astype(str)
+    frame["condicion_meteorologica"] = column("condicion_meteorologica", "").fillna("").astype(str)
+    frame["condicion_luz"] = column("condicion_luz", "").fillna("").astype(str)
+    frame["cielo_sin_techo"] = column("cielo_sin_techo", "").fillna("").astype(str)
+    frame["cielo_con_techo"] = column("cielo_con_techo", "").fillna("").astype(str)
     frame["aeropuerto_id"] = pd.to_numeric(column("aeropuerto_id", -1), errors="coerce").fillna(-1).astype(int).astype(str)
     frame["tipo_incidente_id"] = pd.to_numeric(column("tipo_incidente_id", -1), errors="coerce").fillna(-1).astype(int).astype(str)
     frame["aeronave_id"] = pd.to_numeric(column("aeronave_id", -1), errors="coerce").fillna(-1).astype(int).astype(str)
@@ -48,6 +56,13 @@ def build_feature_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     frame["has_coordinates"] = (~raw_latitud.isna() & ~raw_longitud.isna()).astype(int)
     frame["latitud"] = raw_latitud.fillna(0.0)
     frame["longitud"] = raw_longitud.fillna(0.0)
+    frame["visibilidad_millas"] = pd.to_numeric(column("visibilidad_millas", np.nan), errors="coerce").fillna(0.0)
+    frame["viento_kt"] = pd.to_numeric(column("viento_kt", np.nan), errors="coerce").fillna(0.0)
+    frame["viento_dir_deg"] = pd.to_numeric(column("viento_dir_deg", np.nan), errors="coerce").fillna(0.0)
+    frame["temperatura_c"] = pd.to_numeric(column("temperatura_c", np.nan), errors="coerce").fillna(0.0)
+    frame["punto_rocio_c"] = pd.to_numeric(column("punto_rocio_c", np.nan), errors="coerce").fillna(0.0)
+    frame["techo_nubes_ft"] = pd.to_numeric(column("techo_nubes_ft", np.nan), errors="coerce").fillna(0.0)
+    frame["precipitacion"] = column("intensidad_precipitacion", "").fillna("").astype(str).map(lambda value: 0 if value.strip() == "" else 1)
 
     fecha = pd.to_datetime(column("fecha_hora", None), errors="coerce", utc=True)
     frame["hour"] = fecha.dt.hour.fillna(12).astype(int)
@@ -57,16 +72,31 @@ def build_feature_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
 
     frame["descripcion"] = frame["descripcion"].map(_normalize_text)
     frame["fase_vuelo"] = frame["fase_vuelo"].map(_normalize_text)
+    frame["condicion_meteorologica"] = frame["condicion_meteorologica"].map(_normalize_text)
+    frame["condicion_luz"] = frame["condicion_luz"].map(_normalize_text)
+    frame["cielo_sin_techo"] = frame["cielo_sin_techo"].map(_normalize_text)
+    frame["cielo_con_techo"] = frame["cielo_con_techo"].map(_normalize_text)
 
     return frame[
         [
             "descripcion",
             "fase_vuelo",
+            "condicion_meteorologica",
+            "condicion_luz",
+            "cielo_sin_techo",
+            "cielo_con_techo",
             "aeropuerto_id",
             "tipo_incidente_id",
             "aeronave_id",
             "latitud",
             "longitud",
+            "visibilidad_millas",
+            "viento_kt",
+            "viento_dir_deg",
+            "temperatura_c",
+            "punto_rocio_c",
+            "techo_nubes_ft",
+            "precipitacion",
             "hour",
             "day_of_week",
             "month",
@@ -201,12 +231,36 @@ def create_model_pipeline() -> Pipeline:
             (
                 "categorical",
                 OneHotEncoder(handle_unknown="ignore"),
-                ["fase_vuelo", "aeropuerto_id", "tipo_incidente_id", "aeronave_id"],
+                [
+                    "fase_vuelo",
+                    "condicion_meteorologica",
+                    "condicion_luz",
+                    "cielo_sin_techo",
+                    "cielo_con_techo",
+                    "aeropuerto_id",
+                    "tipo_incidente_id",
+                    "aeronave_id",
+                ],
             ),
             (
                 "numeric",
                 StandardScaler(with_mean=False),
-                ["latitud", "longitud", "hour", "day_of_week", "month", "is_night", "has_coordinates"],
+                [
+                    "latitud",
+                    "longitud",
+                    "visibilidad_millas",
+                    "viento_kt",
+                    "viento_dir_deg",
+                    "temperatura_c",
+                    "punto_rocio_c",
+                    "techo_nubes_ft",
+                    "precipitacion",
+                    "hour",
+                    "day_of_week",
+                    "month",
+                    "is_night",
+                    "has_coordinates",
+                ],
             ),
         ]
     )
@@ -218,13 +272,71 @@ def create_model_pipeline() -> Pipeline:
                 "classifier",
                 LogisticRegression(
                     max_iter=1500,
-                    multi_class="multinomial",
                     class_weight="balanced",
                     random_state=42,
                 ),
             ),
         ]
     )
+
+
+def load_ntsb_training_rows(path: Path = NTSB_TRAINING_PATH) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+
+    frame = pd.read_csv(path, low_memory=False)
+    if frame.empty:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for _, row in frame.iterrows():
+        rows.append(
+            {
+                "aeropuerto_id": None,
+                "tipo_incidente_id": None,
+                "aeronave_id": None,
+                "fase_vuelo": row.get("fase_vuelo"),
+                "condicion_meteorologica": row.get("condicion_meteorologica"),
+                "condicion_luz": row.get("condicion_luz"),
+                "cielo_sin_techo": row.get("cielo_sin_techo"),
+                "cielo_con_techo": row.get("cielo_con_techo"),
+                "descripcion": row.get("descripcion"),
+                "latitud": row.get("latitud"),
+                "longitud": row.get("longitud"),
+                "visibilidad_millas": row.get("visibilidad_millas"),
+                "viento_kt": row.get("viento_kt"),
+                "viento_dir_deg": row.get("viento_dir_deg"),
+                "temperatura_c": row.get("temperatura_c"),
+                "punto_rocio_c": row.get("punto_rocio_c"),
+                "techo_nubes_ft": row.get("techo_nubes_ft"),
+                "intensidad_precipitacion": row.get("intensidad_precipitacion"),
+                "fecha_hora": _combine_fecha_hora(row.get("fecha"), row.get("hora")),
+                "nivel_riesgo": row.get("nivel_riesgo"),
+            }
+        )
+
+    return rows
+
+
+def _combine_fecha_hora(fecha: Any, hora: Any) -> str | None:
+    if pd.isna(fecha):
+        return None
+    fecha_ts = pd.to_datetime(fecha, errors="coerce")
+    if pd.isna(fecha_ts):
+        return None
+
+    if pd.isna(hora):
+        return fecha_ts.isoformat()
+
+    try:
+        hour_value = int(float(hora))
+        hours = hour_value // 100
+        minutes = hour_value % 100
+        fecha_ts = fecha_ts.replace(hour=hours, minute=minutes)
+    except Exception:
+        pass
+
+    return fecha_ts.isoformat()
 
 
 def train_bundle(rows: list[dict[str, Any]], source_name: str) -> dict[str, Any]:
@@ -236,7 +348,17 @@ def train_bundle(rows: list[dict[str, Any]], source_name: str) -> dict[str, Any]
     target = [row["nivel_riesgo"] for row in training_rows]
 
     pipeline = create_model_pipeline()
-    pipeline.fit(frame, target)
+    x_train, x_test, y_train, y_test = train_test_split(
+        frame,
+        target,
+        test_size=0.2,
+        random_state=42,
+        stratify=target,
+    )
+    pipeline.fit(x_train, y_train)
+    predictions = pipeline.predict(x_test)
+    accuracy = float(accuracy_score(y_test, predictions))
+    report = classification_report(y_test, predictions, output_dict=True, zero_division=0)
 
     return {
         "pipeline": pipeline,
@@ -244,6 +366,12 @@ def train_bundle(rows: list[dict[str, Any]], source_name: str) -> dict[str, Any]
         "risk_weights": RISK_WEIGHTS.tolist(),
         "model_version": f"logreg-multiclass-{source_name}",
         "training_rows": len(training_rows),
+        "metrics": {
+            "accuracy": accuracy,
+            "samples_train": len(x_train),
+            "samples_test": len(x_test),
+            "classification_report": report,
+        },
     }
 
 
@@ -255,6 +383,13 @@ def save_bundle(bundle: dict[str, Any], path: Path = MODEL_PATH) -> Path:
 
 def bootstrap_bundle() -> dict[str, Any]:
     return train_bundle(create_training_rows(), source_name="bootstrap")
+
+
+def best_available_training_bundle() -> dict[str, Any]:
+    ntsb_rows = load_ntsb_training_rows()
+    if len(ntsb_rows) >= 12:
+        return train_bundle(ntsb_rows, source_name="ntsb-real")
+    return bootstrap_bundle()
 
 
 @dataclass
@@ -274,7 +409,7 @@ class RiskPredictor:
         if self.model_path.exists():
             return joblib.load(self.model_path)
 
-        bundle = bootstrap_bundle()
+        bundle = best_available_training_bundle()
         save_bundle(bundle, self.model_path)
         return bundle
 

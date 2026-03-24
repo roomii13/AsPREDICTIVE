@@ -1,0 +1,5 @@
+file_name,source_id,local_path,file_type,status,approx_use,purpose
+ntsb_avall.zip,ntsb_avall,data/raw/ntsb_avall.zip,zip,download_started,"dataset histórico principal","Base real de accidentes/incidentes"
+metars.cache.csv.gz,awc_metars_cache,data/raw/metars.cache.csv.gz,gzip_csv,pending,"observaciones meteorológicas","Cruce de clima por aeropuerto y fecha"
+stations.cache.json.gz,awc_stations_cache,data/raw/stations.cache.json.gz,gzip_json,pending,"metadatos de estaciones","Mapeo ICAO/IATA y coordenadas"
+jst_manual_exports,jst_portal,data/raw/jst/,mixed,pending,"reportes e informes","Extracción manual o semiautomática desde JST"

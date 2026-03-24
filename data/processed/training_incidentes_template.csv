@@ -1,0 +1,4 @@
+source,source_record_id,fecha_hora,aeropuerto_icao,aeropuerto_nombre,pais,tipo_incidente,fase_vuelo,descripcion,aeronave_modelo,aeronave_matricula,latitud,longitud,metar_raw,wind_kt,visibility_m,precipitation,damage_level,injuries,fatalities,nivel_riesgo,label_source
+NTSB,,,,,,,,,,,,,,,,,,,,,
+JST,,,,,,,,,,,,,,,,,,,,,
+ASRS,,,,,,,,,,,,,,,,,,,,,

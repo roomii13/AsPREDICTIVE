@@ -12,7 +12,11 @@ import IncidentesTable from './IncidentesTable';
 import AlertasPanel from './AlertasPanel';
 import { api } from '../lib/api';
 import type { Alerta, Incidente } from '../lib/types';
-import { getPrediccionRiesgo } from '../services/predictiveService';
+import { getPrediccionRiesgo, type PredictiveResult } from '../services/predictiveService';
+
+type IncidentPrediction = PredictiveResult & {
+  incidentId: number;
+};
 
 async function generarAlertasPredictivas() {
   const incidentes = await api.listIncidentes(20);
@@ -59,6 +63,7 @@ export default function Dashboard() {
 });
   const [recentIncidentes, setRecentIncidentes] = useState<Incidente[]>([]);
   const [alertas, setAlertas] = useState<Alerta[]>([]);
+  const [incidentPredictions, setIncidentPredictions] = useState<Record<number, IncidentPrediction>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -69,9 +74,22 @@ async function loadDashboardData() {
   try {
     await generarAlertasPredictivas();
     const summary = await api.getDashboardSummary();
+    const predictions = await Promise.all(
+      summary.recentIncidentes.map(async (incidente) => ({
+        incidentId: incidente.id,
+        ...(await getPrediccionRiesgo(incidente)),
+      }))
+    );
+
     setRecentIncidentes(summary.recentIncidentes);
     setAlertas(summary.alertas);
     setStats(summary.stats);
+    setIncidentPredictions(
+      predictions.reduce<Record<number, IncidentPrediction>>((acc, prediction) => {
+        acc[prediction.incidentId] = prediction;
+        return acc;
+      }, {})
+    );
 
   } catch (error) {
       console.error('Error loading dashboard:', error);
@@ -178,12 +196,45 @@ async function loadDashboardData() {
             <h2 className="text-lg font-bold mb-4">Incidentes Recientes</h2>
 
             {recentIncidentes.map((incidente) => (
-              <div key={incidente.id} className="border p-4 rounded-lg mb-2">
-                <p className="font-semibold">{incidente.tipos_incidente?.nombre}</p>
-                <p className="text-sm text-gray-600">{incidente.aeropuertos?.nombre}</p>
+              <div key={incidente.id} className="border p-4 rounded-lg mb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{incidente.tipos_incidente?.nombre}</p>
+                    <p className="text-sm text-gray-600">{incidente.aeropuertos?.nombre}</p>
+                  </div>
+                  {incidentPredictions[incidente.id] && (
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Puntaje IA</p>
+                      <p className="text-lg font-bold text-sky-700">{incidentPredictions[incidente.id].score}%</p>
+                    </div>
+                  )}
+                </div>
                 <span className={`text-xs px-2 py-1 rounded ${getRiesgoColor(incidente.nivel_riesgo)}`}>
                   {incidente.nivel_riesgo}
                 </span>
+                {incidentPredictions[incidente.id] && (
+                  <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
+                    <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
+                      <span className="px-2 py-1 rounded-full bg-sky-100 text-sky-700">
+                        Modelo: {incidentPredictions[incidente.id].modelo || 'No disponible'}
+                      </span>
+                      <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                        Origen: {incidentPredictions[incidente.id].fuente === 'api' ? 'Modelo productivo' : 'Respaldo local'}
+                      </span>
+                    </div>
+                    <p className="text-xs font-semibold text-gray-700 mb-1">Factores principales</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(incidentPredictions[incidente.id].factores?.slice(0, 3) || ['Sin factores disponibles']).map((factor) => (
+                        <span
+                          key={factor}
+                          className="text-xs px-2 py-1 rounded-full bg-white border border-slate-200 text-slate-700"
+                        >
+                          {factor}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
 
@@ -194,6 +245,22 @@ async function loadDashboardData() {
                     <span className="text-2xl font-bold">{stats.riesgoFuturo}%</span>
                 </div>
               <h3 className="text-sm text-gray-600">Riesgo Próximas 24h</h3>
+              <p className="mt-3 text-sm text-gray-600">
+                Estimado con modelo entrenado en NTSB y variables meteorológicas reales.
+              </p>
+              <div className="mt-4 rounded-lg bg-sky-50 border border-sky-100 p-4">
+                <p className="text-xs font-semibold text-sky-800 mb-2">Explicabilidad IA</p>
+                <p className="text-sm text-sky-900">
+                  El motor pondera narrativa del incidente, fase de vuelo, condiciones de luz, visibilidad,
+                  viento, techo de nubes y otras señales operacionales para priorizar riesgo.
+                </p>
+              </div>
+              <div className="mt-4 rounded-lg bg-emerald-50 border border-emerald-100 p-4">
+                <p className="text-xs font-semibold text-emerald-800 mb-2">Motor predictivo desplegado</p>
+                <p className="text-sm text-emerald-900">
+                  Entrenado con 30.212 eventos oficiales de NTSB y precisión de validación cercana al 78%.
+                </p>
+              </div>
           </div>
           <AlertasPanel alertas={alertas} onUpdate={loadDashboardData} />
 

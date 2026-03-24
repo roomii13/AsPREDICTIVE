@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
+import secrets
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -21,13 +23,18 @@ from .api_schemas import (
     IncidenteOut,
     IncidentePayload,
     LoginRequest,
+    ModelMetricsOut,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     RegisterRequest,
     UsuarioOut,
+    AuditLogOut,
 )
 from .config import settings
 from .db import Base, engine, get_db
-from .model_service import RiskPredictor, bootstrap_bundle, save_bundle, train_bundle
-from .models import Aeronave, Aeropuerto, Alerta, Incidente, TipoIncidente, Usuario
+from .model_service import RiskPredictor, bootstrap_bundle, load_ntsb_training_rows, save_bundle, train_bundle
+from .models import Aeronave, Aeropuerto, Alerta, AuditLog, Incidente, PasswordResetToken, TipoIncidente, Usuario
+from .observability import cleanup_expired_password_resets, log_request_event, logger, write_audit_log
 from .schemas import HealthResponse, IncidentePayload as PredictPayload, PredictionResponse
 from .seed import seed_initial_data
 from .security import create_access_token, decode_access_token, get_password_hash, verify_password
@@ -45,11 +52,32 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    started = datetime.utcnow()
+    try:
+        response = await call_next(request)
+        duration_ms = (datetime.utcnow() - started).total_seconds() * 1000
+        log_request_event(request, response.status_code, duration_ms)
+        return response
+    except Exception as error:
+        duration_ms = (datetime.utcnow() - started).total_seconds() * 1000
+        logger.exception("unhandled_error path=%s duration_ms=%.2f", request.url.path, duration_ms)
+        return JSONResponse(status_code=500, content={"detail": "Error interno del servidor"})
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
     with Session(bind=engine) as db:
         seed_initial_data(db)
+        cleanup_expired_password_resets(db, PasswordResetToken)
+        db.commit()
 
 
 def to_user_out(user: Usuario) -> UsuarioOut:
@@ -127,6 +155,15 @@ def get_current_user(
     return user
 
 
+def require_roles(*allowed_roles: str):
+    def dependency(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+        if current_user.rol not in allowed_roles:
+            raise HTTPException(status_code=403, detail="No tienes permisos suficientes")
+        return current_user
+
+    return dependency
+
+
 def fetch_incidentes_with_relations(db: Session, limit: int) -> list[Incidente]:
     statement = (
         select(Incidente)
@@ -174,6 +211,13 @@ def calculate_riesgo_futuro(incidentes: list[Incidente]) -> int:
 
 
 def train_predictive_model_from_db(db: Session) -> dict[str, Any]:
+    ntsb_rows = load_ntsb_training_rows()
+    if len(ntsb_rows) >= 12:
+        bundle = train_bundle(ntsb_rows, source_name="ntsb-real")
+        save_bundle(bundle)
+        predictor.reload()
+        return bundle
+
     rows = [
         {
             "aeropuerto_id": incidente.aeropuerto_id,
@@ -218,6 +262,14 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
         estado=True,
     )
     db.add(user)
+    write_audit_log(
+        db,
+        actor_user_id=user.id,
+        action="usuario_registrado",
+        resource_type="usuario",
+        resource_id=user.id,
+        details={"email": user.email, "rol": user.rol},
+    )
     db.commit()
     db.refresh(user)
 
@@ -232,6 +284,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
 
     user.ultimo_login = datetime.utcnow()
+    write_audit_log(
+        db,
+        actor_user_id=user.id,
+        action="inicio_sesion",
+        resource_type="usuario",
+        resource_id=user.id,
+        details={"email": user.email},
+    )
     db.commit()
 
     token = create_access_token(user.id)
@@ -241,6 +301,65 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
 @app.get("/auth/me", response_model=UsuarioOut)
 def me(current_user: Usuario = Depends(get_current_user)) -> UsuarioOut:
     return to_user_out(current_user)
+
+
+@app.post("/auth/password-reset/request")
+def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(get_db)) -> dict[str, str]:
+    user = db.scalar(select(Usuario).where(Usuario.email == payload.email))
+    if not user:
+        return {"status": "ok", "message": "Si el correo existe, se generó una solicitud de recuperación"}
+
+    token = secrets.token_urlsafe(32)
+    reset = PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(hours=2),
+    )
+    db.add(reset)
+    write_audit_log(
+        db,
+        actor_user_id=user.id,
+        action="solicitud_recuperacion_acceso",
+        resource_type="password_reset",
+        resource_id=user.id,
+        details={"email": user.email},
+    )
+    db.commit()
+
+    return {
+        "status": "ok",
+        "message": "Solicitud generada. En esta versión el token se devuelve para uso administrativo.",
+        "reset_token": token,
+    }
+
+
+@app.post("/auth/password-reset/confirm")
+def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)) -> dict[str, str]:
+    reset = db.scalar(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token == payload.token,
+            PasswordResetToken.used_at.is_(None),
+        )
+    )
+    if not reset or reset.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Token inválido o expirado")
+
+    user = db.get(Usuario, reset.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    user.password_hash = get_password_hash(payload.new_password)
+    reset.used_at = datetime.utcnow()
+    write_audit_log(
+        db,
+        actor_user_id=user.id,
+        action="recuperacion_acceso_confirmada",
+        resource_type="usuario",
+        resource_id=user.id,
+        details={"email": user.email},
+    )
+    db.commit()
+    return {"status": "ok", "message": "Contraseña actualizada correctamente"}
 
 
 @app.get("/catalogs/aeropuertos", response_model=list[CatalogAeropuertoOut])
@@ -320,6 +439,13 @@ def create_incidente(
         reportado_por=current_user.id,
     )
     db.add(incidente)
+    write_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="incidente_creado",
+        resource_type="incidente",
+        details={"aeropuerto_id": payload.aeropuerto_id, "nivel_riesgo": payload.nivel_riesgo},
+    )
     db.commit()
     db.refresh(incidente)
     incidente = db.scalar(
@@ -334,7 +460,7 @@ def create_incidente(
 def update_incidente(
     incidente_id: int,
     payload: IncidentePayload,
-    _: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> IncidenteOut:
     incidente = db.get(Incidente, incidente_id)
@@ -350,6 +476,14 @@ def update_incidente(
     incidente.fase_vuelo = payload.fase_vuelo
     incidente.latitud = payload.latitud
     incidente.longitud = payload.longitud
+    write_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="incidente_actualizado",
+        resource_type="incidente",
+        resource_id=str(incidente_id),
+        details={"nivel_riesgo": payload.nivel_riesgo},
+    )
     db.commit()
 
     incidente = db.scalar(
@@ -374,7 +508,7 @@ def list_alertas(
 @app.post("/alertas", response_model=AlertaOut, status_code=201)
 def create_alerta(
     payload: AlertaCreate,
-    _: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AlertaOut:
     alerta = Alerta(
@@ -386,6 +520,13 @@ def create_alerta(
         estado=payload.estado,
     )
     db.add(alerta)
+    write_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="alerta_creada",
+        resource_type="alerta",
+        details={"tipo_alerta": payload.tipo_alerta, "nivel_criticidad": payload.nivel_criticidad},
+    )
     db.commit()
     db.refresh(alerta)
     alerta = db.scalar(select(Alerta).options(joinedload(Alerta.aeropuerto)).where(Alerta.id == alerta.id))
@@ -395,7 +536,7 @@ def create_alerta(
 @app.post("/alertas/{alerta_id}/resolve", response_model=AlertaOut)
 def resolve_alerta(
     alerta_id: int,
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_roles("administrador", "supervisor", "inspector")),
     db: Session = Depends(get_db),
 ) -> AlertaOut:
     alerta = db.get(Alerta, alerta_id)
@@ -405,6 +546,14 @@ def resolve_alerta(
     alerta.estado = "Resuelta"
     alerta.atendido_por = current_user.id
     alerta.fecha_resolucion = datetime.utcnow()
+    write_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="alerta_resuelta",
+        resource_type="alerta",
+        resource_id=str(alerta_id),
+        details={"estado": alerta.estado},
+    )
     db.commit()
 
     alerta = db.scalar(select(Alerta).options(joinedload(Alerta.aeropuerto)).where(Alerta.id == alerta_id))
@@ -444,14 +593,48 @@ def predict(payload: PredictPayload) -> PredictionResponse:
     return PredictionResponse(score=result.score, nivel=result.nivel, factores=result.factores, modelo=result.modelo)
 
 
+@app.get("/model/metrics", response_model=ModelMetricsOut)
+def model_metrics(_: Usuario = Depends(get_current_user)) -> ModelMetricsOut:
+    metrics = predictor.bundle.get("metrics", {})
+    return ModelMetricsOut(
+        model_version=predictor.model_version,
+        training_rows=int(predictor.bundle.get("training_rows", 0)),
+        accuracy=metrics.get("accuracy"),
+        samples_train=metrics.get("samples_train"),
+        samples_test=metrics.get("samples_test"),
+    )
+
+
+@app.get("/audit-logs", response_model=list[AuditLogOut])
+def list_audit_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    _: Usuario = Depends(require_roles("administrador", "supervisor")),
+    db: Session = Depends(get_db),
+) -> list[AuditLogOut]:
+    logs = list(db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)))
+    return [
+        AuditLogOut(
+            id=log.id,
+            actor_user_id=log.actor_user_id,
+            action=log.action,
+            resource_type=log.resource_type,
+            resource_id=log.resource_id,
+            details_json=log.details_json,
+            created_at=log.created_at,
+        )
+        for log in logs
+    ]
+
+
 @app.post("/train")
 def train_model(
-    _: Usuario = Depends(get_current_user),
+    _: Usuario = Depends(require_roles("administrador", "analista")),
     db: Session = Depends(get_db),
-) -> dict[str, str | int]:
+) -> dict[str, Any]:
     bundle = train_predictive_model_from_db(db)
     return {
         "status": "ok",
         "training_rows": int(bundle["training_rows"]),
         "model_version": predictor.model_version,
+        "metrics": bundle.get("metrics", {}),
     }

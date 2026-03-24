@@ -73,7 +73,7 @@ El repo ya incluye [render.yaml](/C:/Users/Hugo%20Celis/OneDrive/Escritorio/AsPR
 Campos ya preparados:
 
 - `rootDir=backend`
-- `buildCommand=pip install -r requirements.txt`
+- `buildCommand=pip install -r requirements.txt && python train_model.py`
 - `startCommand=uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 - `healthCheckPath=/health`
 
@@ -89,3 +89,9 @@ Una vez desplegado, usa esa URL en Netlify:
 
 - `VITE_API_URL=https://tu-servicio.onrender.com`
 - `VITE_PREDICTIVE_API_URL=https://tu-servicio.onrender.com`
+
+Con esta configuración, Render entrena el modelo automáticamente durante el deploy usando:
+
+1. `data/processed/ntsb_training_base.csv` si existe
+2. incidentes de PostgreSQL si no existe ese CSV
+3. bootstrap sintético solo como último fallback

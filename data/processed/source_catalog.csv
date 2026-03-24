@@ -1,0 +1,11 @@
+source_id,source_name,category,coverage,format,url,status,notes
+ntsb_avall,NTSB Aviation Dataset,incidents,US and selected international,MDB ZIP,https://data.ntsb.gov/avdata/FileDirectory/DownloadFile?fileID=C:\avdata\avall.zip,download_started,"Dataset oficial histórico de aviación de NTSB desde 2008 en adelante"
+ntsb_pre2008,NTSB Legacy Dataset,incidents,US and selected international,MDB ZIP,https://data.ntsb.gov/avdata/FileDirectory/DownloadFile?fileID=C:\avdata\pre2008.zip,not_downloaded,"Histórico legacy 1982-2007"
+ntsb_pre1982,NTSB Legacy Dataset,incidents,US and selected international,MDB ZIP,https://data.ntsb.gov/avdata/FileDirectory/DownloadFile?fileID=C:\avdata\pre1982.zip,not_downloaded,"Histórico legacy 1962-1981"
+awc_metars_cache,AviationWeather METAR Cache,weather,Worldwide,GZ CSV,https://aviationweather.gov/data/cache/metars.cache.csv.gz,pending,"METAR actuales, actualización cada minuto"
+awc_stations_cache,AviationWeather Stations Cache,weather,Worldwide,GZ JSON,https://aviationweather.gov/data/cache/stations.cache.json.gz,pending,"Listado de estaciones, actualización diaria"
+awc_taf_api,AviationWeather TAF API,weather,Worldwide,API JSON/CSV/XML,https://aviationweather.gov/data/api/,pending,"Útil para enriquecer predicción con pronóstico"
+jst_portal,JST Argentina Aviación,incidents,Argentina,Portal/PDF,https://www.argentina.gob.ar/jst/aviacion,pending,"Fuente oficial argentina para informes, anuarios y análisis"
+jst_report_search,JST Report Search,incidents,Argentina,Portal,https://so.jst.gob.ar/en/home/report-search/,pending,"Buscador de reportes oficiales"
+jst_annuario,JST Anuarios de Seguridad,stats,Argentina,PDF/Portal,https://www.argentina.gob.ar/jst/aviacion/anuarios-estadisticos-aviacion,pending,"Útil para contexto, tendencias y validación"
+nasa_asrs,NASA ASRS,incident_reports,Worldwide,Portal/Data,https://asrs.arc.nasa.gov/overview/database.html,pending,"Muy útil para texto narrativo y clasificación de descripciones"
