@@ -8,7 +8,10 @@ import type {
   Incidente,
   Inspeccion,
   NivelRiesgo,
+  NotificacionOperativa,
   ReporteEjecutivo,
+  ExporteRegulatorio,
+  ResultadoOperacionMasiva,
   AccionCorrectiva,
   CursoCapacitacion,
   FormTemplate,
@@ -223,6 +226,19 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  async deleteInspection(inspectionId: number) {
+    return request<void>(`/institutional/inspections/${inspectionId}`, {
+      method: 'DELETE',
+    });
+  },
+  async deleteTestInspections(title = 'auditoria', organizationKey = 'default') {
+    return request<ResultadoOperacionMasiva>(
+      `/institutional/inspections?organization_key=${organizationKey}&title=${encodeURIComponent(title)}&only_pending=true`,
+      {
+        method: 'DELETE',
+      },
+    );
+  },
   async listCorrectiveActions(organizationKey = 'default') {
     return request<AccionCorrectiva[]>(`/institutional/corrective-actions?organization_key=${organizationKey}`);
   },
@@ -285,5 +301,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ puntaje, observaciones }),
     });
+  },
+  async listNotifications(organizationKey = 'default') {
+    return request<NotificacionOperativa[]>(`/institutional/notifications?organization_key=${organizationKey}`);
+  },
+  async markNotificationRead(notificationId: number, estado = 'Leida') {
+    return request<NotificacionOperativa>(`/institutional/notifications/${notificationId}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ estado }),
+    });
+  },
+  async getRegulatoryExport(organizationKey = 'default') {
+    return request<ExporteRegulatorio>(`/institutional/exports/regulatory?organization_key=${organizationKey}`);
   },
 };

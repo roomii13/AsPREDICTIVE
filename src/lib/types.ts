@@ -219,3 +219,32 @@ export interface RegistroCapacitacion {
   observaciones: string | null;
   created_at: string;
 }
+
+export interface NotificacionOperativa {
+  id: number;
+  organization_key: string;
+  canal: string;
+  tipo: string;
+  titulo: string;
+  mensaje: string;
+  severidad: string;
+  estado: string;
+  destinatario_user_id: string | null;
+  recurso_tipo: string | null;
+  recurso_id: string | null;
+  sent_at: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface ExporteRegulatorio {
+  generado_en: string;
+  formato: string;
+  nombre_archivo: string;
+  contenido: string;
+}
+
+export interface ResultadoOperacionMasiva {
+  eliminados: number;
+  detalle: string;
+}

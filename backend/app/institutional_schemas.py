@@ -179,3 +179,8 @@ class RegulatoryExportOut(BaseModel):
     formato: str
     nombre_archivo: str
     contenido: str
+
+
+class BulkOperationResultOut(BaseModel):
+    eliminados: int
+    detalle: str

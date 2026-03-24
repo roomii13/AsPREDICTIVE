@@ -6,6 +6,7 @@ import type {
   CursoCapacitacion,
   FormTemplate,
   Inspeccion,
+  NotificacionOperativa,
   RegistroCapacitacion,
 } from '../lib/types';
 
@@ -46,7 +47,11 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
   const [actions, setActions] = useState<AccionCorrectiva[]>([]);
   const [courses, setCourses] = useState<CursoCapacitacion[]>([]);
   const [records, setRecords] = useState<RegistroCapacitacion[]>([]);
+  const [notifications, setNotifications] = useState<NotificacionOperativa[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllInspections, setShowAllInspections] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
 
   const [templateName, setTemplateName] = useState('');
   const [inspectionTitle, setInspectionTitle] = useState('');
@@ -61,18 +66,20 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
 
   async function loadInstitutionalData() {
     try {
-      const [templatesData, inspectionsData, actionsData, coursesData, recordsData] = await Promise.all([
+      const [templatesData, inspectionsData, actionsData, coursesData, recordsData, notificationsData] = await Promise.all([
         api.listFormTemplates(),
         api.listInspections(),
         api.listCorrectiveActions(),
         api.listTrainingCourses(),
         api.listTrainingRecords(),
+        api.listNotifications(),
       ]);
       setTemplates(templatesData);
       setInspections(inspectionsData);
       setActions(actionsData);
       setCourses(coursesData);
       setRecords(recordsData);
+      setNotifications(notificationsData);
     } catch (error) {
       console.error('Error loading operational data:', error);
     } finally {
@@ -158,6 +165,38 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
     await loadInstitutionalData();
   }
 
+  async function handleExportRegulatory() {
+    try {
+      setExporting(true);
+      const report = await api.getRegulatoryExport();
+      const blob = new Blob([report.contenido], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = report.nombre_archivo;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleCleanupTestInspections() {
+    try {
+      setCleaning(true);
+      await api.deleteTestInspections();
+      await loadInstitutionalData();
+      await onUpdate?.();
+    } finally {
+      setCleaning(false);
+    }
+  }
+
+  async function handleMarkNotificationRead(notificationId: number) {
+    await api.markNotificationRead(notificationId);
+    await loadInstitutionalData();
+  }
+
   if (loading) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/60">
@@ -195,6 +234,26 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
             <p className="mt-1 text-2xl font-semibold text-slate-900">{records.length}</p>
           </div>
         </div>
+      </div>
+
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm shadow-slate-200/50">
+        <button
+          onClick={handleExportRegulatory}
+          disabled={exporting}
+          className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {exporting ? 'Generando reporte...' : 'Descargar reporte regulatorio'}
+        </button>
+        <button
+          onClick={handleCleanupTestInspections}
+          disabled={cleaning || inspections.length === 0}
+          className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {cleaning ? 'Limpiando...' : 'Borrar inspecciones de prueba'}
+        </button>
+        <p className="text-sm text-slate-500">
+          Notificaciones activas: <span className="font-semibold text-slate-900">{notifications.filter((item) => item.estado !== 'Leida').length}</span>
+        </p>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
@@ -255,7 +314,7 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
             </button>
           </div>
           <div className="space-y-2">
-            {inspections.slice(0, 4).map((inspection) => (
+            {(showAllInspections ? inspections : inspections.slice(0, 4)).map((inspection) => (
               <div key={inspection.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="font-medium text-slate-900">{inspection.titulo}</p>
                 <p className="mt-1 text-sm text-slate-500">
@@ -263,6 +322,14 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
                 </p>
               </div>
             ))}
+            {inspections.length > 4 && (
+              <button
+                onClick={() => setShowAllInspections((current) => !current)}
+                className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                {showAllInspections ? 'Ver menos' : `Ver todas (${inspections.length})`}
+              </button>
+            )}
           </div>
         </ModuleCard>
 
@@ -353,6 +420,45 @@ export default function InstitutionalPanel({ onUpdate }: Props) {
                 </div>
               );
             })}
+          </div>
+        </ModuleCard>
+
+        <ModuleCard
+          icon={<ShieldCheck className="h-5 w-5 text-slate-700" />}
+          title="Notificaciones y seguimiento"
+          description="Eventos internos generados por inspecciones, acciones y capacitaciones."
+          accent="bg-slate-100"
+        >
+          <div className="space-y-2">
+            {notifications.slice(0, 6).map((notification) => (
+              <div key={notification.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-slate-900">{notification.titulo}</p>
+                    <p className="mt-1 text-sm text-slate-500">{notification.mensaje}</p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{notification.estado}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                      {notification.severidad}
+                    </span>
+                    {notification.estado !== 'Leida' && (
+                      <button
+                        onClick={() => handleMarkNotificationRead(notification.id)}
+                        className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-white"
+                      >
+                        Marcar leida
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {!notifications.length && (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                No hay notificaciones operativas registradas.
+              </div>
+            )}
           </div>
         </ModuleCard>
       </div>

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .db import get_db
@@ -17,6 +17,7 @@ from .institutional_schemas import (
     FormTemplatePayload,
     InspectionOut,
     InspectionPayload,
+    BulkOperationResultOut,
     NotificationEventOut,
     NotificationReadPayload,
     RegulatoryExportOut,
@@ -225,6 +226,98 @@ def create_inspection(
     db.commit()
     db.refresh(inspection)
     return inspection
+
+
+@router.delete("/inspections/{inspection_id}", status_code=204)
+def delete_inspection(
+    inspection_id: int,
+    current_user: Usuario = Depends(require_roles("administrador", "supervisor")),
+    db: Session = Depends(get_db),
+) -> None:
+    inspection = db.get(Inspection, inspection_id)
+    if not inspection:
+        raise HTTPException(status_code=404, detail="Inspeccion no encontrada")
+
+    linked_actions = list(db.scalars(select(CorrectiveAction).where(CorrectiveAction.inspection_id == inspection_id)))
+    for action in linked_actions:
+        action.inspection_id = None
+        action.updated_at = datetime.utcnow()
+
+    db.execute(
+        delete(NotificationEvent).where(
+            NotificationEvent.organization_key == inspection.organization_key,
+            NotificationEvent.tipo == "inspection_created",
+            NotificationEvent.mensaje.contains(f"'{inspection.titulo}'"),
+        )
+    )
+
+    write_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="inspeccion_eliminada",
+        resource_type="inspection",
+        resource_id=str(inspection_id),
+        details={"titulo": inspection.titulo},
+    )
+    db.delete(inspection)
+    db.commit()
+
+
+@router.delete("/inspections", response_model=BulkOperationResultOut)
+def delete_test_inspections(
+    organization_key: str = Query(default="default"),
+    title: str | None = Query(default=None),
+    only_pending: bool = Query(default=True),
+    current_user: Usuario = Depends(require_roles("administrador", "supervisor")),
+    db: Session = Depends(get_db),
+) -> BulkOperationResultOut:
+    statement = select(Inspection).where(Inspection.organization_key == organization_key)
+    if title:
+        statement = statement.where(Inspection.titulo == title)
+    if only_pending:
+        statement = statement.where(Inspection.estado == "Pendiente")
+
+    inspections = list(db.scalars(statement))
+    if not inspections:
+        return BulkOperationResultOut(eliminados=0, detalle="No se encontraron inspecciones para eliminar")
+
+    inspection_ids = [inspection.id for inspection in inspections]
+    inspection_titles = sorted({inspection.titulo for inspection in inspections})
+
+    linked_actions = list(db.scalars(select(CorrectiveAction).where(CorrectiveAction.inspection_id.in_(inspection_ids))))
+    for action in linked_actions:
+        action.inspection_id = None
+        action.updated_at = datetime.utcnow()
+
+    for inspection in inspections:
+        db.delete(inspection)
+
+    for inspection_title in inspection_titles:
+        db.execute(
+            delete(NotificationEvent).where(
+                NotificationEvent.organization_key == organization_key,
+                NotificationEvent.tipo == "inspection_created",
+                NotificationEvent.mensaje.contains(f"'{inspection_title}'"),
+            )
+        )
+
+    write_audit_log(
+        db,
+        actor_user_id=current_user.id,
+        action="inspecciones_eliminadas",
+        resource_type="inspection",
+        details={
+            "organization_key": organization_key,
+            "titulo": title,
+            "only_pending": only_pending,
+            "eliminados": len(inspection_ids),
+        },
+    )
+    db.commit()
+    return BulkOperationResultOut(
+        eliminados=len(inspection_ids),
+        detalle="Inspecciones eliminadas correctamente",
+    )
 
 
 @router.get("/corrective-actions", response_model=list[CorrectiveActionOut])
