@@ -6,13 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
-from app.model_service import MODEL_PATH, bootstrap_bundle, combine_training_rows, load_ntsb_training_rows, save_bundle, train_bundle
+from app.model_service import MODEL_PATH, bootstrap_bundle, combine_training_rows, load_jst_training_rows, load_ntsb_training_rows, save_bundle, train_bundle
 from app.models import Incidente
 
 
 def main() -> None:
     load_dotenv()
     ntsb_rows = load_ntsb_training_rows()
+    jst_rows = load_jst_training_rows()
     with SessionLocal() as db:
         postgres_rows = [
             {
@@ -33,7 +34,7 @@ def main() -> None:
             for incidente in db.scalars(select(Incidente).where(Incidente.nivel_riesgo.is_not(None)))
         ]
 
-    training_rows, source_name = combine_training_rows(ntsb_rows, postgres_rows)
+    training_rows, source_name = combine_training_rows([*ntsb_rows, *jst_rows], postgres_rows)
 
     if len(training_rows) >= 12:
         bundle = train_bundle(training_rows, source_name=source_name)

@@ -1,28 +1,53 @@
 # Datos oficiales para entrenamiento
 
-Esta carpeta organiza fuentes oficiales de aviación y clima para construir datasets reales.
+Esta carpeta organiza fuentes oficiales de aviacion y clima para construir datasets reales.
 
 ## Estructura
 
 - `raw/`: archivos descargados directamente desde fuentes oficiales
-- `processed/`: CSVs listos para inspección o para una etapa posterior de entrenamiento
+- `processed/`: CSV listos para inspeccion o entrenamiento
 
-## Qué dejé preparado
+## Que quedo preparado
 
-- `processed/source_catalog.csv`: catálogo de fuentes oficiales recomendadas
+- `processed/source_catalog.csv`: catalogo de fuentes oficiales recomendadas
 - `processed/official_raw_files.csv`: inventario de archivos descargados o pendientes
-- `processed/training_incidentes_template.csv`: esquema base del dataset de incidentes
+- `processed/training_incidentes_template.csv`: esquema general del dataset de incidentes
+- `processed/jst_incidentes_template.csv`: plantilla de carga para incidentes argentinos JST
 - `scripts/fetch_official_aviation_data.py`: descarga fuentes oficiales
+- `scripts/import_jst_argentina.py`: transforma JST a CSV de entrenamiento e inserta incidentes en PostgreSQL
 
-## Fuente descargada
+## Fuentes ya trabajadas
 
 - `raw/ntsb_avall.zip`
-  Descarga oficial de NTSB iniciada desde el dataset histórico de aviación.
-  Si el archivo está incompleto o corrupto, vuelve a descargarlo con el script.
+- `processed/ntsb_training_base.csv`
+- `processed/metars_current.csv`
+- `processed/stations_current.csv`
 
-## Próximo paso recomendado
+## Importar JST Argentina
 
-1. Ejecutar `scripts/fetch_official_aviation_data.py`
-2. Verificar las descargas en `data/raw`
-3. Parsear el dataset NTSB o exportarlo a CSV con una etapa adicional
-4. Cruzar incidentes con METAR por aeropuerto y fecha/hora
+1. Completa `processed/jst_incidentes_template.csv` con incidentes argentinos reales.
+2. Ejecuta:
+
+```bash
+python scripts/import_jst_argentina.py
+```
+
+Eso hace dos cosas:
+
+- genera `processed/jst_training_base.csv`
+- inserta incidentes en PostgreSQL si la base esta configurada
+
+Si solo quieres generar el CSV de entrenamiento sin tocar la base:
+
+```bash
+python scripts/import_jst_argentina.py --skip-db
+```
+
+## Entrenamiento posterior
+
+El backend ya quedo preparado para entrenar con estas capas:
+
+1. NTSB historico
+2. JST Argentina importado
+3. incidentes reales de tu propia operacion en PostgreSQL
+4. bootstrap sintetico solo como ultimo fallback

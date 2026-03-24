@@ -1,0 +1,2 @@
+source_record_id,fecha_hora,aeropuerto_icao,aeropuerto_nombre,ciudad,provincia,tipo_incidente,categoria_incidente,fase_vuelo,descripcion,aeronave_modelo,aeronave_matricula,tipo_aeronave,condicion_meteorologica,condicion_luz,visibilidad_millas,viento_kt,latitud,longitud,lesionados,fatalidades,nivel_riesgo
+JST-AR-0001,2026-03-01T14:25:00,SAZR,Santa Rosa,Santa Rosa,La Pampa,Excursion de pista,Pista,Aterrizaje,La aeronave se desvio lateralmente durante la carrera de aterrizaje por pista humeda.,B737-800,LV-FPS,Comercial,Lluvia,Dia,5,18,-36.5883,-64.2757,0,0,Alto

@@ -24,6 +24,7 @@ MODEL_DIR = ROOT_DIR / "models"
 MODEL_PATH = MODEL_DIR / "risk_model.joblib"
 PROJECT_ROOT = ROOT_DIR.parent
 NTSB_TRAINING_PATH = PROJECT_ROOT / "data" / "processed" / "ntsb_training_base.csv"
+JST_TRAINING_PATH = PROJECT_ROOT / "data" / "processed" / "jst_training_base.csv"
 RISK_ORDER: list[NivelRiesgo] = ["Bajo", "Medio", "Alto", "Crítico"]
 RISK_WEIGHTS = np.array([25.0, 50.0, 75.0, 100.0])
 
@@ -318,6 +319,37 @@ def load_ntsb_training_rows(path: Path = NTSB_TRAINING_PATH) -> list[dict[str, A
     return rows
 
 
+def load_jst_training_rows(path: Path = JST_TRAINING_PATH) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+
+    frame = pd.read_csv(path, low_memory=False)
+    if frame.empty:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for _, row in frame.iterrows():
+        rows.append(
+            {
+                "aeropuerto_id": None,
+                "tipo_incidente_id": None,
+                "aeronave_id": None,
+                "fase_vuelo": row.get("fase_vuelo"),
+                "condicion_meteorologica": row.get("condicion_meteorologica"),
+                "condicion_luz": row.get("condicion_luz"),
+                "descripcion": row.get("descripcion"),
+                "latitud": row.get("latitud"),
+                "longitud": row.get("longitud"),
+                "visibilidad_millas": row.get("visibilidad_millas"),
+                "viento_kt": row.get("viento_kt"),
+                "fecha_hora": row.get("fecha_hora"),
+                "nivel_riesgo": row.get("nivel_riesgo"),
+            }
+        )
+
+    return rows
+
+
 def combine_training_rows(
     ntsb_rows: list[dict[str, Any]] | None = None,
     postgres_rows: list[dict[str, Any]] | None = None,
@@ -404,8 +436,10 @@ def bootstrap_bundle() -> dict[str, Any]:
 
 def best_available_training_bundle() -> dict[str, Any]:
     ntsb_rows = load_ntsb_training_rows()
-    if len(ntsb_rows) >= 12:
-        return train_bundle(ntsb_rows, source_name="ntsb-real")
+    jst_rows = load_jst_training_rows()
+    training_rows, source_name = combine_training_rows(ntsb_rows, jst_rows)
+    if len(training_rows) >= 12:
+        return train_bundle(training_rows, source_name=source_name)
     return bootstrap_bundle()
 
 
