@@ -1,2 +1,6 @@
-data/processed/*.csv filter=lfs diff=lfs merge=lfs -text
+data/processed/ntsb_aircraft.csv filter=lfs diff=lfs merge=lfs -text
+data/processed/ntsb_events.csv filter=lfs diff=lfs merge=lfs -text
+data/processed/ntsb_training_base.csv filter=lfs diff=lfs merge=lfs -text
+data/processed/metars_current.csv filter=lfs diff=lfs merge=lfs -text
+data/processed/stations_current.csv filter=lfs diff=lfs merge=lfs -text
 backend/models/*.joblib filter=lfs diff=lfs merge=lfs -text
