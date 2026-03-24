@@ -364,7 +364,7 @@ def create_inspection(
     return inspection
 
 
-@router.delete("/inspections/{inspection_id}", status_code=204)
+@router.delete("/inspections/{inspection_id}")
 def delete_inspection(
     inspection_id: int,
     current_user: Usuario = Depends(require_roles("administrador", "supervisor")),
