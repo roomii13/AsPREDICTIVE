@@ -24,7 +24,7 @@ export default function AlertasPanel({ alertas, onUpdate }: Props) {
     }
   }
 
-  // 🔥 Traducción de mensajes técnicos a lenguaje claro
+  //Traducción de mensajes técnicos a lenguaje claro
   function formatMensaje(mensaje: string) {
     return mensaje
       .replace(/numeric coordinates/gi, 'Ubicación en zona crítica')
@@ -87,16 +87,18 @@ export default function AlertasPanel({ alertas, onUpdate }: Props) {
                     </span>
                   </div>
 
-                  {/* 🔥 NUEVO: título más claro */}
+              
                   <p className="text-xs font-semibold text-gray-500">
                     Factores de riesgo:
                   </p>
 
-                  {/* 🔥 mensaje mejorado */}
+                  
                   <p className="mb-2 text-sm text-gray-700">
                     {formatMensaje(alerta.mensaje)}
                   </p>
-
+                   <pre className="text-xs text-red-500">
+                    {JSON.stringify(alerta, null, 2)}
+                    </pre>
                   {alerta.aeropuertos && (
                     <p className="text-xs text-gray-600">
                       Aeropuerto: {alerta.aeropuertos.nombre}
